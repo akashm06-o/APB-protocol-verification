@@ -1,0 +1,127 @@
+```systemverilog
+`timescale 1ns/1ps
+
+module tb_top;
+
+    // Clock and reset
+    logic PCLK;
+    logic PRESETn;
+
+    // APB signals
+    logic        PSEL;
+    logic        PENABLE;
+    logic        PWRITE;
+    logic [7:0]  PADDR;
+    logic [31:0] PWDATA;
+
+    logic [31:0] PRDATA;
+    logic        PREADY;
+    logic        PSLVERR;
+
+    // Instantiate the APB slave
+    apb_slave dut (
+        .PCLK    (PCLK),
+        .PRESETn (PRESETn),
+        .PSEL    (PSEL),
+        .PENABLE (PENABLE),
+        .PWRITE  (PWRITE),
+        .PADDR   (PADDR),
+        .PWDATA  (PWDATA),
+        .PRDATA  (PRDATA),
+        .PREADY  (PREADY),
+        .PSLVERR (PSLVERR)
+    );
+
+    // Generate a clock with a 10 ns period
+    initial PCLK = 0;
+    always #5 PCLK = ~PCLK;
+
+    // APB write task
+    task automatic apb_write(
+        input logic [7:0]  addr,
+        input logic [31:0] data
+    );
+        begin
+            @(negedge PCLK);
+            PSEL   = 1;
+            PENABLE = 0;
+            PWRITE = 1;
+            PADDR  = addr;
+            PWDATA = data;
+
+            @(negedge PCLK);
+            PENABLE = 1;
+
+            @(negedge PCLK);
+            PSEL    = 0;
+            PENABLE = 0;
+            PWRITE  = 0;
+        end
+    endtask
+
+    // APB read task
+    task automatic apb_read(
+        input logic [7:0] addr,
+        input logic [31:0] expected_data
+    );
+        logic [31:0] actual_data;
+        begin
+            @(negedge PCLK);
+            PSEL    = 1;
+            PENABLE = 0;
+            PWRITE  = 0;
+            PADDR   = addr;
+
+            @(negedge PCLK);
+            PENABLE = 1;
+
+            // Sample read data during the access phase
+            #1;
+            actual_data = PRDATA;
+
+            if (actual_data === expected_data)
+                $display("PASS: Read address=%h data=%h",
+                         addr, actual_data);
+            else
+                $error("FAIL: Address=%h expected=%h actual=%h",
+                       addr, expected_data, actual_data);
+
+            @(negedge PCLK);
+            PSEL    = 0;
+            PENABLE = 0;
+        end
+    endtask
+
+    // Run tests
+    initial begin
+        PRESETn = 0;
+        PSEL    = 0;
+        PENABLE = 0;
+        PWRITE  = 0;
+        PADDR   = 0;
+        PWDATA  = 0;
+
+        $dumpfile("apb_wave.vcd");
+        $dumpvars(0, tb_top);
+
+        // Reset the slave
+        repeat (2) @(negedge PCLK);
+        PRESETn = 1;
+
+        // Write and read test
+        apb_write(8'h00, 32'h12345678);
+        apb_read (8'h00, 32'h12345678);
+
+        apb_write(8'h04, 32'hA5A5A5A5);
+        apb_read (8'h04, 32'hA5A5A5A5);
+
+        apb_write(8'h08, 32'hDEADBEEF);
+        apb_read (8'h08, 32'hDEADBEEF);
+
+        $display("APB verification test completed.");
+        #20;
+        $finish;
+    end
+
+endmodule
+```
